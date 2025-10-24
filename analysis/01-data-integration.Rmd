@@ -1,0 +1,197 @@
+---
+title: "Data integration"
+author: "James Ashmore"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: workflowr::wflow_html
+editor_options:
+  chunk_output_type: console
+---
+
+## Setup
+
+Set chunk options:
+
+```{r knitr}
+knitr::opts_chunk$set(
+  autodep    = TRUE,
+  cache      = TRUE,
+  cache.path = "cache/01-data-integration.Rmd/",
+  cache.lazy = FALSE,
+  dev        = "png",
+  error      = FALSE,
+  message    = FALSE,
+  warning    = FALSE
+)
+```
+
+Load required packages:
+
+```{r}
+library(scater)
+library(scran)
+library(batchelor)
+library(patchwork)
+library(EnsDb.Mmusculus.v79)
+library(org.Mm.eg.db)
+library(msigdbr)
+```
+
+Read experiment data:
+
+```{r}
+sce <- list(
+  NEG = readRDS("data/YS_GFP_NEG_C.rds"),
+  POS = readRDS("data/YS_GFP_POS_D.rds")
+)
+```
+
+Read variance data:
+
+```{r}
+dec <- list(
+  NEG = metadata(sce$NEG)$modelGeneVar,
+  POS = metadata(sce$POS)$modelGeneVar
+)
+```
+
+## Preparation
+
+Make feature names consistent:
+
+```{r}
+for (i in names(sce)) { rownames(sce[[i]]) <- rowData(sce[[i]])$gene_id }
+
+for (i in names(sce)) { rownames(dec[[i]]) <- rowData(sce[[i]])$gene_id }
+```
+
+Reduce data and models to common features:
+
+```{r}
+ids <- Reduce(intersect, lapply(sce, rownames))
+
+sce <- lapply(sce, "[", i = ids, )
+
+dec <- lapply(dec, "[", i = ids, )
+```
+
+Per-batch scaling normalization:
+
+```{r}
+sce <- do.call(multiBatchNorm, sce)
+
+dec <- do.call(combineVar, dec)
+
+rownames(dec) <- ids
+```
+
+Blacklist genes for feature selection:
+
+```{r}
+use <- rownames(sce$NEG)[rowData(sce$NEG)$blacklist == FALSE]
+```
+
+Clear incompatible feature data:
+
+```{r}
+for (i in names(sce)) { rowData(sce[[i]]) <- rowData(sce[[i]])[, c("gene_id", "gene_name")]}
+```
+
+Select features for batchelor integration:
+
+```{r}
+hvg <- getTopHVGs(dec[use, ], var.field = "bio", var.threshold = 0, fdr.field = "p.value", fdr.threshold = 0.05)
+```
+
+## Correction
+
+Perform mutual nearest neighbors correction:
+
+```{r}
+set.seed(1156433063)
+
+mnn <- correctExperiments(
+  "NEG" = sce$NEG,
+  "POS" = sce$POS,
+  subset.row = hvg,
+  correct.all = TRUE,
+  PARAM = FastMnnParam(merge.order = list("NEG", "POS"))
+)
+```
+
+## Diagnostics
+
+Check proportion of lost variance:
+
+```{r}
+metadata(mnn)$merge.info$lost.var
+```
+
+Cluster on the corrected PCA to obtain a partitioning of the cells:
+
+```{r}
+snn <- buildSNNGraph(mnn, type = "jaccard", use.dimred = "corrected")
+
+com <- igraph::cluster_louvain(snn)
+
+mnn$cluster <- factor(com$membership)
+```
+
+Tabulate number of cells from multiple batches within each cluster:
+
+```{r}
+tab <- table(Cluster = mnn$cluster, Batch = mnn$batch)
+
+knitr::kable(tab)
+```
+
+Visualize the corrected PCA using a TSNE plot: 
+
+```{r}
+set.seed(1166689068)
+
+mnn <- runTSNE(mnn, dimred = "corrected")
+
+plotTSNE(mnn, colour_by = "batch", text_by = "cluster")
+```
+
+Visualize the corrected PCA using a UMAP plot: 
+
+```{r}
+set.seed(1027371528)
+
+mnn <- runUMAP(mnn, dimred = "corrected")
+
+plotUMAP(mnn, colour_by = "batch", text_by = "cluster")
+```
+
+## Processing
+
+Make feature names unique:
+
+```{r}
+rownames(mnn) <- uniquifyFeatureNames(rowData(mnn)$gene_id, rowData(mnn)$gene_name)
+```
+
+Store combined variance model:
+
+```{r}
+rownames(dec) <- rownames(mnn)
+
+metadata(mnn)$combineVar <- dec
+```
+
+Store highly variable genes:
+
+```{r}
+metadata(mnn)$getTopHVGs <- hvg
+```
+
+## Summary
+
+### Output
+
+Write experiment object to a file:
+
+```{r}
+saveRDS(mnn, file = "data/01-data-integration.rds")
+```

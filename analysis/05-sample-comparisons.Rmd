@@ -1,0 +1,352 @@
+---
+title: "Sample comparisons"
+author: "James Ashmore"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: workflowr::wflow_html
+editor_options:
+  chunk_output_type: console
+---
+
+## Introduction
+
+Perform multi-sample comparisons to identify differerential gene expression and cell-type abundance. This dataset has no replicates so our methods are severely limited.
+
+## Setup
+
+Set chunk options:
+
+```{r}
+knitr::opts_chunk$set(
+  autodep    = TRUE,
+  cache      = TRUE,
+  cache.path = "cache/05-sample-comparisons.Rmd/",
+  dev        = "png",
+  echo       = TRUE,
+  error      = FALSE,
+  message    = FALSE,
+  warning    = FALSE
+)
+```
+
+Load Bioconductor packages:
+
+```{r}
+library(scater)
+library(scran)
+```
+
+```{r include = FALSE}
+DT::datatable(matrix())
+```
+
+Import experiment data:
+
+```{r}
+sce <- readRDS("data/04-marker-detection.rds")
+```
+
+## Differential expression
+
+### Condition
+
+Identify genes affected by condition:
+
+```{r}
+res <- pairwiseWilcox(x = logcounts(sce), groups = sce$phenotype)
+
+lab <- paste(res$pairs$first, "vs", res$pairs$second)
+
+names(res$statistics) <- lab
+
+idx <- c("NEG vs POS")
+
+res$statistics <- res$statistics[idx]
+
+res$statistics <- Filter(nrow, res$statistics)
+
+sig <- lapply(res$statistics, subset, FDR < 0.05)
+
+sig <- Filter(nrow, sig)
+```
+
+#### Table {.tabset}
+
+Display table of all significant genes:
+
+```{r results = "asis", echo = FALSE}
+for (n in names(sig)) {
+
+  dat <- as.data.frame(sig[[n]])
+
+  cat("#####", n, "\n")
+
+  cat(knitr::knit_print(DT::datatable(dat)))
+
+  cat("\n\n")
+
+}
+```
+
+#### Heatmap {.tabset}
+
+Plot heatmap of most significant genes:
+
+```{r, fig.height = 8, fig.width = 10, results = "asis"}
+for (n in names(sig)) {
+  
+  dat <- sig[[n]]
+  
+  dat <- head(dat, n = 50)
+  
+  ids <- rownames(dat)
+
+  cat("#####", n, "\n")
+  
+  plotHeatmap(sce, ids, center = TRUE, symmetric = TRUE, colour_columns_by = "batch", show_colnames = FALSE)
+  
+  cat("\n\n")
+  
+}
+```
+
+#### Dimension {.tabset}
+
+Plot UMAP of most significant genes:
+
+```{r, fig.height = 8, fig.width = 10, results = "asis"}
+for (n in names(sig)) {
+
+  dat <- sig[[n]]
+
+  dat <- head(dat, n = 12)
+
+  ids <- rownames(dat)
+
+  plt <- lapply(ids, function(x) plotUMAP(sce, colour_by = x, shape_by = "batch") + ggtitle(x))
+
+  cat("#####", n, "\n")
+
+  print(patchwork::wrap_plots(plt))
+
+  cat("\n\n")
+
+}
+```
+
+### Condition (within cluster)
+
+Identify genes affected by condition within clusters:
+
+```{r}
+fct <- paste0(sce$phenotype, "-", sce$cluster)
+
+res <- pairwiseWilcox(x = logcounts(sce), groups = fct)
+
+lab <- paste(res$pairs$first, "vs", res$pairs$second)
+
+names(res$statistics) <- lab
+
+idx <- sapply(unique(sce$cluster), function(x) paste0("NEG-", x, " vs ", "POS-", x))
+
+res$statistics <- res$statistics[idx]
+
+res$statistics <- Filter(nrow, res$statistics)
+
+sig <- lapply(res$statistics, subset, FDR < 0.05)
+
+sig <- Filter(nrow, sig)
+```
+
+#### Table {.tabset}
+
+Display table of all significant genes:
+
+```{r results = "asis", echo = FALSE}
+for (n in names(sig)) {
+
+  dat <- as.data.frame(sig[[n]])
+
+  cat("#####", n, "\n")
+
+  cat(knitr::knit_print(DT::datatable(dat)))
+
+  cat("\n\n")
+
+}
+```
+
+#### Heatmap {.tabset}
+
+Plot heatmap of most significant genes:
+
+```{r, fig.height = 8, fig.width = 10, results = "asis"}
+for (n in names(sig)) {
+  
+  dat <- sig[[n]]
+  
+  dat <- head(dat, n = 50)
+  
+  ids <- rownames(dat)
+
+  cat("#####", n, "\n")
+  
+  plotHeatmap(sce, ids, center = TRUE, symmetric = TRUE, colour_columns_by = c("batch", "cluster"), order_columns_by = c("batch", "cluster"), show_colnames = FALSE)
+  
+  cat("\n\n")
+  
+}
+```
+
+#### Dimension {.tabset}
+
+Plot UMAP of most significant genes:
+
+```{r, fig.height = 8, fig.width = 10, results = "asis"}
+for (n in names(sig)) {
+
+  dat <- sig[[n]]
+
+  dat <- head(dat, n = 12)
+
+  ids <- rownames(dat)
+
+  plt <- lapply(ids, function(x) plotUMAP(sce, colour_by = x, shape_by = "batch", text_by = "cluster") + ggtitle(x))
+
+  cat("#####", n, "\n")
+
+  print(patchwork::wrap_plots(plt))
+
+  cat("\n\n")
+
+}
+```
+
+### Condition (within celltype)
+
+Identify genes affected by condition within celltype:
+
+```{r}
+fct <- paste0(sce$phenotype, "-", sce$celltype)
+
+res <- pairwiseWilcox(x = logcounts(sce), groups = fct)
+
+lab <- paste(res$pairs$first, "vs", res$pairs$second)
+
+names(res$statistics) <- lab
+
+idx <- sapply(unique(sce$celltype), function(x) paste0("NEG-", x, " vs ", "POS-", x))
+
+res$statistics <- res$statistics[idx]
+
+res$statistics <- Filter(nrow, res$statistics)
+
+sig <- lapply(res$statistics, subset, FDR < 0.05)
+
+sig <- Filter(nrow, sig)
+```
+
+#### Table {.tabset}
+
+Display table of all significant genes:
+
+```{r results = "asis", echo = FALSE}
+for (n in names(sig)) {
+
+  dat <- as.data.frame(sig[[n]])
+
+  cat("#####", n, "\n")
+
+  cat(knitr::knit_print(DT::datatable(dat)))
+
+  cat("\n\n")
+
+}
+```
+
+#### Heatmap {.tabset}
+
+Plot heatmap of most significant genes:
+
+```{r, fig.height = 8, fig.width = 10, results = "asis"}
+for (n in names(sig)) {
+  
+  dat <- sig[[n]]
+  
+  dat <- head(dat, n = 50)
+  
+  ids <- rownames(dat)
+
+  cat("#####", n, "\n")
+  
+  plotHeatmap(sce, ids, center = TRUE, symmetric = TRUE, colour_columns_by = c("batch", "celltype"), order_columns_by = c("batch", "celltype"), show_colnames = FALSE)
+  
+  cat("\n\n")
+  
+}
+```
+
+#### Dimension {.tabset}
+
+Plot UMAP of most significant genes:
+
+```{r, fig.height = 8, fig.width = 10, results = "asis"}
+for (n in names(sig)) {
+
+  dat <- sig[[n]]
+
+  dat <- head(dat, n = 12)
+
+  ids <- rownames(dat)
+
+  plt <- lapply(ids, function(x) plotUMAP(sce, colour_by = x, shape_by = "batch", text_by = "cluster") + ggtitle(x))
+
+  cat("#####", n, "\n")
+
+  print(patchwork::wrap_plots(plt))
+
+  cat("\n\n")
+
+}
+```
+
+## Differential abundance
+
+### Condition (by cluster)
+
+Tabulate combination of cluster and condition:
+
+```{r}
+tab <- table(sce$batch, sce$cluster)
+
+knitr::kable(tab)
+```
+
+Determine if association between variables exists and is significant:
+
+```{r}
+fisher.test(tab)
+```
+
+### Condition (by celltype)
+
+Tabulate combination of celltype and condition:
+
+```{r}
+tab <- table(sce$batch, sce$celltype)
+
+knitr::kable(tab)
+```
+
+Determine if association between variables exists and is significant:
+
+```{r eval = FALSE}
+fisher.test(tab) # do not evaluate because 2 x 1 table
+```
+
+## Summary
+
+Save experiment to disk:
+
+```{r}
+saveRDS(sce, file = "data/05-sample-comparisons.rds")
+```
